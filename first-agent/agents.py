@@ -20,18 +20,9 @@ api_client = asana.ApiClient(configuration)
 tasks_api_instance = asana.TasksApi(api_client)
 
 # Function that adds tasks to ASANA
-def create_asana_task(task_name, due_on="today"):
+def create_asana_task(task_name, due_on="today", description=None, assignee=None, dependencies=None, custom_fields=None, subtasks=None):
     """
-    Creates a task in Asana given the name of the task and when it is due
-
-    Example call:
-
-    create_asana_task("Test Task", "2024-06-24")
-    Args:
-        task_name (str): The name of the task in Asana
-        due_on (str): The date the task is due in the format YYYY-MM-DD. If not given, the current day is used
-    Returns:
-        str: The API response of adding the task to Asana or an error message if the API call threw an error
+    Creates a task in Asana with enhanced capabilities
     """
     if due_on == "today":
         due_on = str(datetime.now().date())
@@ -43,12 +34,38 @@ def create_asana_task(task_name, due_on="today"):
             "projects": [os.getenv("ASANA_PROJECT_ID", "")]
         }
     }
+    
+    # Add optional fields if provided
+    if description:
+        task_body["data"]["notes"] = description
+    if assignee:
+        task_body["data"]["assignee"] = assignee
+    if dependencies:
+        task_body["data"]["dependencies"] = dependencies
+    if custom_fields:
+        task_body["data"]["custom_fields"] = custom_fields
 
     try:
+        # Create main task
         api_response = tasks_api_instance.create_task(task_body, {})
+        task_gid = api_response['gid']
+
+         # Create subtasks if provided
+        if subtasks:
+            for subtask_name in subtasks:
+                subtask_body = {
+                    "data": {
+                        "name": subtask_name,
+                        "parent": task_gid,
+                        "projects": [os.getenv("ASANA_PROJECT_ID", "")]
+                    }
+                }
+                tasks_api_instance.create_task(subtask_body, {})
+
         return json.dumps(api_response, indent=2)
     except ApiException as e:
         return f"Exception when calling TasksApi->create_task: {e}"
+
     
 def get_tools():
     # Tools is an array where each item is an array that defines the function the AI LLM can call 
@@ -57,7 +74,7 @@ def get_tools():
             "type": "function",
             "function": {
                 "name": "create_asana_task",
-                "description": "Creates a task in Asana given the name of the task and when it is due", # tell AI when to use the function
+                "description": "Creates a task in Asana with full details including description, assignee, dependencies, custom fields, and subtasks",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -67,8 +84,30 @@ def get_tools():
                         },
                         "due_on": {
                             "type": "string",
-                            "description": "The date the task is due in the format YYYY-MM-DD. If not given, the current day is used"
+                            "description": "The date the task is due in format YYYY-MM-DD"
                         },
+                        "description": {
+                            "type": "string",
+                            "description": "Detailed description/notes for the task"
+                        },
+                        "assignee": {
+                            "type": "string",
+                            "description": "Asana user GID to assign the task to"
+                        },
+                        "dependencies": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of task GIDs that this task depends on"
+                        },
+                        "custom_fields": {
+                            "type": "object",
+                            "description": "Dictionary of custom field GIDs and their values"
+                        },
+                        "subtasks": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of subtask names to create"
+                        }
                     },
                     "required": ["task_name"]
                 },
