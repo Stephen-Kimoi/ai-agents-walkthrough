@@ -7,6 +7,9 @@ import os
 
 load_dotenv()
 
+print(f"Using repo: {os.getenv('GITHUB_REPO')}")
+print(f"Token exists: {bool(os.getenv('GITHUB_TOKEN'))}")
+
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 model = os.getenv('OPENAI_MODEL', 'gpt-4')
 
@@ -14,27 +17,41 @@ model = os.getenv('OPENAI_MODEL', 'gpt-4')
 g = Github(os.getenv('GITHUB_TOKEN'))
 repo = g.get_repo(os.getenv('GITHUB_REPO'))
 
+def verify_github_connection():
+    print("Verifying GitHub connection...")
+    print(f"Authenticated user: {g.get_user().login}")
+    print(f"Repository access: {repo.full_name}")
+    return True
+
+verify_github_connection()
+
 def create_github_issue(title, body=None, labels=None, assignee=None, milestone=None):
-    """
-    Creates a GitHub issue with enhanced capabilities
-    """
     try:
-        print(f"Creating issue in repository: {os.getenv('GITHUB_REPO')}")
-        print(f"Using title: {title}")
-        print(f"With labels: {labels}")
+        print("Starting issue creation...")
+        print(f"Repository object exists: {repo is not None}")
+        print(f"Attempting to create issue with title: {title}")
         
+        # Print exact parameters being sent to API
+        print("API Parameters:")
+        print(f"Title: {title}")
+        print(f"Body: {body}")
+        print(f"Labels: {labels}")
+        print(f"Assignee: {assignee}")
+        
+        # Create issue with minimal parameters first
         issue = repo.create_issue(
             title=title,
-            body=body,
-            labels=labels,
-            assignee=assignee,
-            milestone=milestone
+            body=body if body else "No description provided"
         )
-        print(f"Issue created with ID: {issue.id}")
+        
+        print(f"Issue successfully created!")
+        print(f"Issue ID: {issue.id}")
         print(f"Issue URL: {issue.html_url}")
         return json.dumps(issue.raw_data, indent=2)
     except Exception as e:
-        print(f"Full error details: {str(e)}")
+        print(f"Error type: {type(e)}")
+        print(f"Error message: {str(e)}")
+        print(f"Full error stack: ", e.__traceback__)
         return f"Exception details when creating GitHub issue: {str(e)}"
 
 def create_pull_request(title, body=None, base="main", head=None, draft=False):
