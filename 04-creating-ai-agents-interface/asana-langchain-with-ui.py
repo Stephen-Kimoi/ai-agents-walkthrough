@@ -5,11 +5,12 @@ from dotenv import load_dotenv
 from datetime import datetime
 import json
 import os
+import streamlit as st
 
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
+from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage, AIMessage
 
 load_dotenv() 
 
@@ -108,31 +109,37 @@ def prompt_ai(messages, nested_calls=0):
     
 
 def main(): 
-    # Each message has one of 3 roles: 
-       # 1. System Role: it is background context with AI 
-       # 2. User Role: means the message is from the user 
-       # 3. Assistant Role: means it is the response from the AI 
+    # title that will appear in the ui section
+    st.title("Asana with LangChain Chatbot")
 
-    # the AI needs to know the current dates to put on the due dates for the tasks
-    messages = [
-        SystemMessage(content=f"You are a personal assistant who helps manage tasks in Asana. The current date is: {datetime.now().date()}")
-    ]
+    # Initializing session state, everything we're managing in the UI is in the session state
+    if "messages" not in st.session_state:
+        st.session_state.messages = [
+            SystemMessage(content=f"A PA created with Langchain and GPT for managing tasks. The current date is: {datetime.now().date()}")
+        ]    
+
+    # display chat from history on app rerun
+    for message in st.session_state.messages:
+        message_json = json.loads(message.json())
+        message_type = message_json["type"]
+        if message_type in ["human", "ai", "system"]:
+            with st.chat_message(message_type):
+                st.markdown(message_json["content"])  
     
-    # Loop forever and ask the user for another message to send to the AI. If I type 'q' then I quit.
-    while True:
-        user_input = input("Chat with AI (q to quit): ").strip()
+    # React to user input
+    if prompt := st.chat_input("What would you like to do today?"):
+        st.chat_message("user").markdown(prompt)
+        st.session_state.messages.append(HumanMessage(content=prompt))
+
+        # Display assistant response in chat message container
+        with st.chat_message("assistant"):
+            stream = prompt_ai(st.session_state.messages)
+            # Extract just the content from the response
+            response = stream.content if hasattr(stream, 'content') else stream
+            st.write(response)
         
-        if user_input == 'q':
-            break  
-        
-        # Once we get the input from the users, we'll add it to the messages list. Content of the message is the user's input.
-        messages.append(HumanMessage(content=user_input))
-        # We'll create a function "prompt_ai" that will take the messages list and send it to the AI.
-        ai_response = prompt_ai(messages)
-         
-        # We'll print the response then add the AI's response to the messages list.
-        print(ai_response)
-        messages.append({"role": "assistant", "content": ai_response})
+        st.session_state.messages.append(AIMessage(content=response))
+
     
 
 if __name__ == "__main__":
