@@ -79,35 +79,43 @@ def prompt_ai(messages, nested_calls=0):
     asana_chatbot = ChatOpenAI(model=model) if "gpt" in model.lower() else ChatAnthropic(model=model)
     asana_chatbot_with_tools = asana_chatbot.bind_tools(tools)
 
-    ai_response = asana_chatbot_with_tools.invoke(messages)
-    # Only print the content of the message
-    # print(ai_response.content)
+    stream = asana_chatbot_with_tools.stream(messages)
+    # then loop over all chunks in the stream
+    first = True
+    for chunk in stream:
+        if first:
+            gathered = chunk
+            first = False
+        else:
+            gathered = gathered + chunk
+
+        yield chunk
     
-    tool_calls = len(ai_response.tool_calls) > 0
+    # tool calls will be in the gathered tool calls
+    has_tool_calls = len(gathered.tool_calls) > 0
 
     # Second, see if the AI decided it needs to invoke a tool
-    if tool_calls:
+    if has_tool_calls:
         # If the AI decided to invoke a tool, invoke it
         available_functions = {
             "create_asana_task": create_asana_task
         }
 
         # Add the tool request to the list of messages so the AI knows later it invoked the tool
-        messages.append(ai_response)
+        messages.append(gathered)
 
         # Next, for each tool the AI wanted to call, call it and add the tool result to the list of messages
-        for tool_call in ai_response.tool_calls:
+        for tool_call in gathered.tool_calls:
             tool_name = tool_call["name"].lower()
             selected_tool = available_functions[tool_name]
             tool_output = selected_tool.invoke(tool_call["args"])
             messages.append(ToolMessage(tool_output, tool_call_id=tool_call["id"]))     
             
         # Call the AI again so it can produce a response with the result of calling the tool(s)
-        ai_response = prompt_ai(messages, nested_calls + 1)
+        additional_stream = prompt_ai(messages, nested_calls + 1)
+        for additional_chunk in additional_stream:
+            yield additional_chunk
         
-    return ai_response
-    
-
 def main(): 
     # title that will appear in the ui section
     st.title("Asana with LangChain Chatbot")
