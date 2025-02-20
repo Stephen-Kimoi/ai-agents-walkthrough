@@ -5,6 +5,10 @@ from datetime import datetime
 import json
 import os
 
+from langchain_core.tools import tool
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
+
 load_dotenv()
 
 print(f"Using repo: {os.getenv('GITHUB_REPO')}")
@@ -25,23 +29,32 @@ def verify_github_connection():
 
 verify_github_connection()
 
+@tool
 def create_github_issue(title, body=None, labels=None, assignee=None, milestone=None):
+    """
+    Creates a GitHub issue with enhanced capabilities.
+    
+    Args:
+        title (str): The title of the GitHub issue
+        body (str, optional): The description/body of the issue in markdown format
+        labels (list, optional): List of labels to apply to the issue
+        assignee (str, optional): GitHub username to assign the issue to
+        milestone (str, optional): Milestone ID to associate with the issue
+    
+    Returns:
+        str: JSON string containing the created issue data
+    """
     try:
         print("Starting issue creation...")
         print(f"Repository object exists: {repo is not None}")
         print(f"Attempting to create issue with title: {title}")
         
-        # Print exact parameters being sent to API
-        print("API Parameters:")
-        print(f"Title: {title}")
-        print(f"Body: {body}")
-        print(f"Labels: {labels}")
-        print(f"Assignee: {assignee}")
-        
-        # Create issue with minimal parameters first
         issue = repo.create_issue(
             title=title,
-            body=body if body else "No description provided"
+            body=body if body else "No description provided",
+            labels=labels,
+            assignee=assignee,
+            milestone=milestone
         )
         
         print(f"Issue successfully created!")
@@ -51,12 +64,22 @@ def create_github_issue(title, body=None, labels=None, assignee=None, milestone=
     except Exception as e:
         print(f"Error type: {type(e)}")
         print(f"Error message: {str(e)}")
-        print(f"Full error stack: ", e.__traceback__)
         return f"Exception details when creating GitHub issue: {str(e)}"
 
+@tool
 def create_pull_request(title, body=None, base="main", head=None, draft=False):
     """
-    Creates a GitHub Pull Request
+    Creates a GitHub Pull Request with specified parameters.
+    
+    Args:
+        title (str): The title of the Pull Request
+        body (str, optional): The description/body of the PR in markdown format
+        base (str, optional): The name of the branch to merge into (default: main)
+        head (str): The name of the branch where changes are implemented
+        draft (bool, optional): Whether to create the pull request as a draft
+    
+    Returns:
+        str: JSON string containing the created PR data
     """
     try:
         pr = repo.create_pull(
@@ -70,124 +93,34 @@ def create_pull_request(title, body=None, base="main", head=None, draft=False):
     except Exception as e:
         return f"Exception when creating Pull Request: {e}"
 
-def get_tools():
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "create_github_issue",
-                "description": "Creates a GitHub issue with title, description, labels, assignee and milestone",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "title": {
-                            "type": "string",
-                            "description": "The title of the GitHub issue"
-                        },
-                        "body": {
-                            "type": "string",
-                            "description": "The description/body of the issue in markdown format"
-                        },
-                        "labels": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "List of labels to apply to the issue"
-                        },
-                        "assignee": {
-                            "type": "string",
-                            "description": "GitHub username to assign the issue to"
-                        },
-                        "milestone": {
-                            "type": "string",
-                            "description": "Milestone ID to associate with the issue"
-                        }
-                    },
-                    "required": ["title"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "create_pull_request",
-                "description": "Creates a GitHub Pull Request",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "title": {
-                            "type": "string",
-                            "description": "The title of the Pull Request"
-                        },
-                        "body": {
-                            "type": "string",
-                            "description": "The description/body of the PR in markdown format"
-                        },
-                        "base": {
-                            "type": "string",
-                            "description": "The name of the branch to merge into"
-                        },
-                        "head": {
-                            "type": "string",
-                            "description": "The name of the branch where changes are implemented"
-                        },
-                        "draft": {
-                            "type": "boolean",
-                            "description": "Whether to create the pull request as a draft"
-                        }
-                    },
-                    "required": ["title", "head"]
-                }
-            }
-        }
-    ]
-    return tools
-
 def prompt_ai(messages):
-    completion = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        tools=get_tools()
-    )
+    tools = [create_github_issue, create_pull_request]
+    github_chatbot = ChatOpenAI(model=os.getenv('OPENAI_MODEL', 'gpt-4'))
+    github_chatbot_with_tools = github_chatbot.bind_tools(tools)
 
-    response_message = completion.choices[0].message
-    tool_calls = response_message.tool_calls
-
-    if tool_calls:
-        available_functions = {
-            "create_github_issue": create_github_issue,
-            "create_pull_request": create_pull_request
-        }
-
-        messages.append(response_message)
-
-        for tool_call in tool_calls:
-            function_name = tool_call.function.name
-            function_to_call = available_functions[function_name]
-            function_args = json.loads(tool_call.function.arguments)
-            function_response = function_to_call(**function_args)
-
-            messages.append({
-                "tool_call_id": tool_call.id,
-                "role": "tool",
-                "name": function_name,
-                "content": function_response
-            })
-
-        second_response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-        )
-        
-        return second_response.choices[0].message.content
-
-    return response_message.content
+    ai_response = github_chatbot_with_tools.invoke(messages)
+    print("AI response is: ", ai_response)
+    
+    if hasattr(ai_response, 'tool_calls') and ai_response.tool_calls:
+        for tool_call in ai_response.tool_calls:
+            # The logs show tool_call has 'name' and 'args' directly
+            function_name = tool_call['name']
+            function_args = tool_call['args']
+            
+            if function_name == 'create_pull_request':
+                result = create_pull_request.invoke(function_args)
+                return f"Pull request created successfully: {result}"
+            elif function_name == 'create_github_issue':
+                result = create_github_issue.invoke(function_args)
+                return f"Issue created successfully: {result}"
+    
+    return ai_response.content
 
 def main():
     messages = [
-        {
-            "role": "system",
-            "content": f"You are a GitHub assistant who helps manage issues and pull requests. The current date is: {datetime.now().date()}"
-        }
+        SystemMessage(content=f"""You are a GitHub assistant who helps manage issues and pull requests. 
+        When creating PRs, always use the create_pull_request tool and provide clear feedback about the result. 
+        The current date is: {datetime.now().date()}""")
     ]
     
     while True:
@@ -196,9 +129,8 @@ def main():
         if user_input == 'q':
             break
         
-        messages.append({"role": "user", "content": user_input})
+        messages.append(HumanMessage(content=user_input))
         ai_response = prompt_ai(messages)
-        print(ai_response)
         messages.append({"role": "assistant", "content": ai_response})
 
 if __name__ == "__main__":
