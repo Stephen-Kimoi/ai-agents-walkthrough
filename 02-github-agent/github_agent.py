@@ -19,7 +19,7 @@ client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 model = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
 
 # Setting up GitHub client
-g = Github(os.getenv('GITHUB_TOKEN'))
+# g = Github(os.getenv('GITHUB_TOKEN'))
 
 def verify_github_connection():
     print(f"Authenticated user: {g.get_user().login}")
@@ -86,6 +86,15 @@ def create_pull_request(title, body=None, base="main", head=None, draft=False):
     Creates a GitHub Pull Request with specified parameters.
     """
     try:
+        print("Starting Pull Request creation...")
+        print(f"Repository object exists: {repo is not None}")
+        print(f"Attempting to create Pull Request with title: {title}")
+        print(f"Base branch: {base}")
+        print(f"Head branch: {head}")
+        # Validate head branch exists
+        if not head:
+            return "Error: Head branch name is required"
+        
         # Generate description from commits if no body provided
         if not body:
             body = generate_pr_description(head)
@@ -107,26 +116,38 @@ def prompt_ai(messages):
     github_chatbot_with_tools = github_chatbot.bind_tools(tools)
 
     ai_response = github_chatbot_with_tools.invoke(messages)
+    print(f"AI response: {ai_response}")
     
     if hasattr(ai_response, 'tool_calls') and ai_response.tool_calls:
         for tool_call in ai_response.tool_calls:
             function_name = tool_call['name']
             function_args = tool_call['args']
             
-            if function_name == 'create_pull_request':
-                result = json.loads(create_pull_request.invoke(function_args))
-                # Extract just the relevant information
-                return f"✨ Pull request created successfully!\n\nTitle: {result['title']}\nURL: {result['html_url']}\nStatus: {result['state']}"
-            elif function_name == 'create_github_issue':
-                result = json.loads(create_github_issue.invoke(function_args))
-                return f"✨ Issue created successfully!\n\nTitle: {result['title']}\nURL: {result['html_url']}\nStatus: {result['state']}"
+            try:
+                if function_name == 'create_pull_request':
+                    function_response = create_pull_request.invoke(function_args)
+                    if isinstance(function_response, str) and function_response.startswith('Exception'):
+                        return function_response
+                    result = json.loads(function_response)
+                    return f"✨ Pull request created successfully!\n\nTitle: {result['title']}\nURL: {result['html_url']}\nStatus: {result['state']}"
+                    
+                elif function_name == 'create_github_issue':
+                    function_response = create_github_issue.invoke(function_args)
+                    if isinstance(function_response, str) and function_response.startswith('Exception'):
+                        return function_response
+                    result = json.loads(function_response)
+                    return f"✨ Issue created successfully!\n\nTitle: {result['title']}\nURL: {result['html_url']}\nStatus: {result['state']}"
+            except json.JSONDecodeError:
+                return f"Error processing {function_name}: Invalid response format"
+            except Exception as e:
+                return f"Error executing {function_name}: {str(e)}"
     
     return ai_response.content
 
 def main():
     st.title("GitHub PR assistant")
 
-    # Add repository input at the top
+    # Repository input at the top
     if "github_repo" not in st.session_state:
         st.session_state.github_repo = ""
     
@@ -134,12 +155,27 @@ def main():
         "Enter GitHub repository (format: username/repo)", 
         value=st.session_state.github_repo
     )
+
+    # GitHub token input
+    if "github_token" not in st.session_state:
+        st.session_state.github_token = ""
     
-    if repo_input:
+    token_input = st.text_input(
+        "Enter your GitHub token",
+        value=st.session_state.github_token,
+        type="password"  # This masks the token for security
+    )
+    
+    if repo_input and token_input:
         st.session_state.github_repo = repo_input
-        global repo
-        repo = g.get_repo(repo_input)
-        verify_github_connection()
+        st.session_state.github_token = token_input
+
+        with st.spinner('Verifying GitHub connection...'):
+            global repo, g
+            g = Github(token_input)
+            repo = g.get_repo(repo_input)
+            verify_github_connection()
+            st.success('✅ GitHub connection verified successfully!')
 
         # Only show chat interface after repo is selected
         if "messages" not in st.session_state:
@@ -166,7 +202,7 @@ def main():
             
             st.session_state.messages.append(HumanMessage(content=response))
     else:
-        st.info("👆 Enter a GitHub repository to start managing issues and pull requests")
+        st.info("👆 Enter a GitHub repository and token to start managing issues and pull requests")
 
 if __name__ == "__main__":
     main()
