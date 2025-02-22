@@ -29,18 +29,34 @@ def verify_github_connection():
 def generate_pr_description(head_branch):
     """Generates PR description based on branch commits"""
     try:
+        print("Starting PR description generation...")
+        print(f"Fetching commits from branch: {head_branch}")
+        
         # Get commits in the branch
         commits = repo.get_commits(sha=head_branch)
-        commit_messages = [commit.commit.message for commit in commits]
+        commit_messages = []
         
+        for commit in commits:
+            message = commit.commit.message
+            commit_messages.append(message)
+            print(f"Found commit: {message}")
+        
+        if not commit_messages:
+            return "No commits found in this branch"
+            
         # Use OpenAI to generate a meaningful description
-        description_prompt = "Based on these commit messages, generate a clear PR description: " + '\n'.join(commit_messages) + "\n\nFocus on:\n- Main changes implemented\n- Key features or fixes\n- Any breaking changes"
+        description_prompt = (
+            "Based on these commit messages, generate a clear PR description:\n" + 
+            "\n".join([f"- {msg}" for msg in commit_messages]) + 
+            "\n\nFocus on:\n- Main changes implemented\n- Key features or fixes\n- Any breaking changes"
+        )
         
         chatbot = ChatOpenAI(model=os.getenv('OPENAI_MODEL', 'gpt-4'))
         response = chatbot.invoke([HumanMessage(content=description_prompt)])
         
         return response.content
     except Exception as e:
+        print(f"Error fetching commits: {str(e)}")
         return f"Could not generate description from commits. Using default description. Error: {str(e)}"
 
 @tool
@@ -98,6 +114,7 @@ def create_pull_request(title, body=None, base="main", head=None, draft=False):
         # Generate description from commits if no body provided
         if not body:
             body = generate_pr_description(head)
+            print(f"Generated PR description: {body}")
 
         pr = repo.create_pull(
             title=title,
@@ -115,6 +132,16 @@ def prompt_ai(messages):
     github_chatbot = ChatOpenAI(model=os.getenv('OPENAI_MODEL', 'gpt-4o-mini'))
     github_chatbot_with_tools = github_chatbot.bind_tools(tools)
 
+    # Enhance the system message to better handle PR creation
+    system_message = """I am a GitHub assistant that helps create pull requests and issues.
+    When creating a pull request:
+    - Extract branch names from the user's request
+    - Generate a descriptive title based on the changes
+    - Generate a detailed description from commit messages
+    - Use the create_pull_request tool with these details
+    """
+    
+    messages[0] = SystemMessage(content=system_message)
     ai_response = github_chatbot_with_tools.invoke(messages)
     print(f"AI response: {ai_response}")
     
