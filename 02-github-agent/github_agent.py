@@ -32,17 +32,20 @@ def generate_pr_description(head_branch):
         print("Starting PR description generation...")
         print(f"Fetching commits from branch: {head_branch}")
         
-        # Get commits in the branch
-        commits = repo.get_commits(sha=head_branch)
-        commit_messages = []
+        # Get commits specific to the feature branch
+        base_commits = set(commit.sha for commit in list(repo.get_commits(sha='main')))
+        print(f"Commits in main: {len(base_commits)}")
+        feature_commits = repo.get_commits(sha=head_branch)
         
-        for commit in commits:
-            message = commit.commit.message
-            commit_messages.append(message)
-            print(f"Found commit: {message}")
+        commit_messages = []
+        for commit in feature_commits:
+            if commit.sha not in base_commits:
+                message = commit.commit.message
+                commit_messages.append(message)
+                print(f"Found commit: {message}")
         
         if not commit_messages:
-            return "No commits found in this branch"
+            return "No unique commits found in this branch"
             
         # Use OpenAI to generate a meaningful description
         description_prompt = (
@@ -132,14 +135,15 @@ def prompt_ai(messages):
     github_chatbot = ChatOpenAI(model=os.getenv('OPENAI_MODEL', 'gpt-4o-mini'))
     github_chatbot_with_tools = github_chatbot.bind_tools(tools)
 
-    # Enhance the system message to better handle PR creation
-    system_message = """I am a GitHub assistant that helps create pull requests and issues.
-    When creating a pull request:
-    - Extract branch names from the user's request
-    - Generate a descriptive title based on the changes
-    - Generate a detailed description from commit messages
-    - Use the create_pull_request tool with these details
-    """
+    # Enhanced system message with explicit instructions
+    system_message = """I am a GitHub assistant that creates pull requests and issues independently.
+    When a user requests a PR creation:
+    1. Extract the branch names from their request
+    2. Automatically create a PR using create_pull_request tool
+    3. Use the head branch name to generate a descriptive title
+    4. Let the tool automatically generate description from commit messages
+    
+    Do not ask for additional information - proceed with PR creation immediately using available branch names."""
     
     messages[0] = SystemMessage(content=system_message)
     ai_response = github_chatbot_with_tools.invoke(messages)
