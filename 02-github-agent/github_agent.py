@@ -15,7 +15,7 @@ load_dotenv()
 # print(f"Using repo: {os.getenv('GITHUB_REPO')}")
 print(f"Token exists: {bool(os.getenv('GITHUB_TOKEN'))}")
 
-client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+# client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 model = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
 
 # Setting up GitHub client
@@ -131,6 +131,9 @@ def create_pull_request(title, body=None, base="main", head=None, draft=False):
         return f"Exception when creating Pull Request: {e}"
 
 def prompt_ai(messages):
+    # Initialize OpenAI client with user's API key
+    client = OpenAI(api_key=st.session_state.openai_key)
+
     tools = [create_github_issue, create_pull_request]
     github_chatbot = ChatOpenAI(model=os.getenv('OPENAI_MODEL', 'gpt-4o-mini'))
     github_chatbot_with_tools = github_chatbot.bind_tools(tools)
@@ -178,62 +181,75 @@ def prompt_ai(messages):
 def main():
     st.title("GitHub PR assistant")
 
-    # Repository input at the top
-    if "github_repo" not in st.session_state:
-        st.session_state.github_repo = ""
+    # OpenAI API key input first
+    if "openai_key" not in st.session_state:
+        st.session_state.openai_key = ""
     
-    repo_input = st.text_input(
-        "Enter GitHub repository (format: username/repo)", 
-        value=st.session_state.github_repo
+    openai_input = st.text_input(
+        "Enter your OpenAI API key",
+        value=st.session_state.openai_key,
+        type="password"  # This masks the API key for security
     )
 
-    # GitHub token input
-    if "github_token" not in st.session_state:
-        st.session_state.github_token = ""
-    
-    token_input = st.text_input(
-        "Enter your GitHub token",
-        value=st.session_state.github_token,
-        type="password"  # This masks the token for security
-    )
-    
-    if repo_input and token_input:
-        st.session_state.github_repo = repo_input
-        st.session_state.github_token = token_input
+    if openai_input:
+        st.session_state.openai_key = openai_input
 
-        with st.spinner('Verifying GitHub connection...'):
-            global repo, g
-            g = Github(token_input)
-            repo = g.get_repo(repo_input)
-            verify_github_connection()
-            st.success('✅ GitHub connection verified successfully!')
+        # Only show GitHub inputs after OpenAI key is provided
+        if "github_repo" not in st.session_state:
+            st.session_state.github_repo = ""
+        
+        repo_input = st.text_input(
+            "Enter GitHub repository (format: username/repo)", 
+            value=st.session_state.github_repo
+        )
 
-        # Only show chat interface after repo is selected
-        if "messages" not in st.session_state:
-            st.session_state.messages = [
-                SystemMessage(content=f"""I am a GitHub assistant that helps you manage issues and pull requests. 
-                I can create new issues, open pull requests, and provide clear feedback with URLs. 
-                Today's date is: {datetime.now().date()}""")
-            ]
+        # GitHub token input
+        if "github_token" not in st.session_state:
+            st.session_state.github_token = ""
+        
+        token_input = st.text_input(
+            "Enter your GitHub token",
+            value=st.session_state.github_token,
+            type="password"  # This masks the token for security
+        )
+        
+        if repo_input and token_input:
+            st.session_state.github_repo = repo_input
+            st.session_state.github_token = token_input
 
-        for message in st.session_state.messages:
-            message_json = json.loads(message.json())
-            message_type = message_json["type"]
-            if message_type in ["human", "ai", "system"]:
-                with st.chat_message(message_type):
-                    st.markdown(message_json["content"])
+            with st.spinner('Verifying GitHub connection...'):
+                global repo, g
+                g = Github(token_input)
+                repo = g.get_repo(repo_input)
+                verify_github_connection()
+                st.success('✅ GitHub connection verified successfully!')
 
-        if prompt := st.chat_input("What would you like to do?"):
-            st.chat_message("user").markdown(prompt)
-            st.session_state.messages.append(HumanMessage(content=prompt))
+            # Show chat interface only after all credentials are provided
+            if "messages" not in st.session_state:
+                st.session_state.messages = [
+                    SystemMessage(content=f"""I am a GitHub assistant that helps you manage issues and pull requests. 
+                    I can create new issues, open pull requests, and provide clear feedback with URLs. 
+                    Today's date is: {datetime.now().date()}""")
+                ]
 
-            with st.chat_message("assistant"):
-                response = prompt_ai(st.session_state.messages)
-                st.markdown(response)
-            
-            st.session_state.messages.append(HumanMessage(content=response))
+            for message in st.session_state.messages:
+                message_json = json.loads(message.json())
+                message_type = message_json["type"]
+                if message_type in ["human", "ai", "system"]:
+                    with st.chat_message(message_type):
+                        st.markdown(message_json["content"])
+
+            if prompt := st.chat_input("What would you like to do?"):
+                st.chat_message("user").markdown(prompt)
+                st.session_state.messages.append(HumanMessage(content=prompt))
+
+                with st.chat_message("assistant"):
+                    response = prompt_ai(st.session_state.messages)
+                    st.markdown(response)
+                
+                st.session_state.messages.append(HumanMessage(content=response))
     else:
-        st.info("👆 Enter a GitHub repository and token to start managing issues and pull requests")
+        st.info("👆 Enter your OpenAI API key to start")
 
 if __name__ == "__main__":
     main()
